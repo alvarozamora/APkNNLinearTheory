@@ -79,7 +79,7 @@ if yt.is_root():
     t = 0
     absb = np.abs(k*r*np.sin(t)*np.sqrt(1-rmu*rmu))
     #plt.semilogx(k, k**2 * Psv(k, t, z=z, sv=sv, b=b) * np.exp(-1j*k*r*rmu*np.cos(t)) * 2*np.pi*jv(0,absb),'k--')
-    plt.show()
+    #plt.show()
 
 
 xf = 6
@@ -89,9 +89,11 @@ y = np.arange(xf)
 
 
 storage = {}
-for sto, i in yt.parallel_objects(range(xf),0,storage=storage):
-    for j in range(xf):
+for sto, n in yt.parallel_objects(range(xf*xf), 0, storage=storage):
         
+        i = n//xf
+        j = n%xf
+
         # compute coordinate
         r = np.sqrt(x[i]*x[i] + y[j]*y[j])
         if r == 0:
@@ -105,7 +107,8 @@ for sto, i in yt.parallel_objects(range(xf),0,storage=storage):
             args=(r,rmu,z,sv,b),opts=[options,options])
         print(i, j, r, rmu, result[0], result[1], result[1]/result[0])
 
-        storage[f'{i}_{j}'] = result[0]
+        sto.result = result[0]
+        sto.result_id = f'{i}_{j}'
 
 if yt.is_root():
 
@@ -118,6 +121,7 @@ if yt.is_root():
     plt.imshow(Xis, origin='lower', extent=(x.min(),x.max(),y.min(),y.max()))
     plt.xlabel(r'Perpendicular Distance ($h^{-1}$ Mpc)')
     plt.ylabel(r'Line-of-Sight Distance ($h^{-1}$ Mpc)')
+    plt.colorbar()
     plt.show()
 
 
