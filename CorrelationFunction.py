@@ -39,21 +39,15 @@ b = 1.
 
 def integrand(k,t,r=r,rmu=rmu,z=z,sv=sv,b=b):
     
-    #unpack arguments
-    #k, t, r, mu, z, sv, b = args
-    #print(k,t,r,rmu,z,sv,b)
-    
     # argument of bessel
     absb = np.abs(k*r*np.sin(t)*np.sqrt(1-rmu*rmu))
     
-    return k**2 * np.sin(t) * Psv(k, t, z=z, sv=sv, b=b) * np.exp(-1j*k*r*rmu*np.cos(t)) * 2*np.pi*jv(0,absb)
-    #return k**2 * Psv(k, t, z=z, sv=sv, b=b) * np.exp(-1j*k*r*rmu*np.cos(t)) * 2*np.pi*jv(0,absb)
+    #return k**2 * np.sin(t) * Psv(k, t, z=z, sv=sv, b=b) * np.exp(-1j*k*r*rmu*np.cos(t)) * 2*np.pi*jv(0,absb)
+    return k**2 * np.sin(t) * Psv(k, t, z=z, sv=sv, b=b) * np.cos(    k*r*rmu*np.cos(t)) * 2*np.pi*jv(0,absb)
     
 #integrand = lambda kk, tt: kk**2 * Psv(kk, tt, z=z, sv=sv, b=b) * np.exp(-1j*kk*r*rmu*np.cos(tt)) * 2*np.pi*jv(0,np.abs(kk*r*np.sin(tt)*np.sqrt(1-rmu*rmu)))
 
 kmin = 1e-3
-#print(dblquad(integrand, 0, np.pi, 0, np.inf, args=(r,rmu,z,sv,b)))
-#print(dblquad(integrand, 0, np.pi, kmin, np.inf, args=args))
 
 k = np.logspace(-3,3,10000)
 '''
@@ -83,13 +77,12 @@ if yt.is_root():
 
 
 xf = 6
-x = np.arange(xf)
-y = np.arange(xf)
-
+x = np.arange(xf)+1/2
+y = np.arange(xf)+1/2
 
 
 storage = {}
-for sto, n in yt.parallel_objects(range(xf*xf), 0, storage=storage):
+for sto, n in yt.parallel_objects(range(xf*xf)[::-1], 0, storage=storage,dynamic=True):
         
         i = n//xf
         j = n%xf
@@ -118,11 +111,11 @@ if yt.is_root():
             Xis[i,j] = storage[f"{i}_{j}"]
 
     plt.figure()
-    plt.imshow(Xis, origin='lower', extent=(x.min(),x.max(),y.min(),y.max()))
+    plt.imshow(Xis, origin='lower', extent=(x.min()-0.5,x.max()+0.5,y.min()-0.5,y.max()+0.5))
+    plt.xticks(np.arange(xf+1), np.arange(xf+1))
+    plt.yticks(np.arange(xf+1), np.arange(xf+1))
     plt.xlabel(r'Perpendicular Distance ($h^{-1}$ Mpc)')
     plt.ylabel(r'Line-of-Sight Distance ($h^{-1}$ Mpc)')
     plt.colorbar()
-    plt.show()
-
-
+    plt.savefig('CorrFunc.png',dpi=230)
         
