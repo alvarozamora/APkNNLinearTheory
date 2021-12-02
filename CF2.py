@@ -6,7 +6,13 @@ from scipy.integrate import nquad
 from scipy.special import jv, jn_zeros
 import yt; yt.enable_parallelism(); print(yt.is_root()); is_root = yt.is_root()
 from mpmath import quadosc
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--cg', type=int, default=5)
+parser.add_argument('-c', type=int, default=1)
+args = parser.parse_args()
 
+print(args.cg, args.c)
 
 # Custom Plot Formatting
 plt.rcParams['figure.facecolor'] ='white'
@@ -76,7 +82,7 @@ def integrand(t,r,rmu,z=z,sv=sv,b=b):
     
     period = np.array([np.diff(np.sort(coszeros)).mean(), np.diff(np.sort(j0zeros)).mean()])
     period = np.min(period[np.invert(np.isnan(period))])
-    zeros = lambda n: n*period/2
+    zeros = lambda n: n*period/8
     #if is_root:
         #print(f"integrating theta={t:.4f}")
 
@@ -89,12 +95,12 @@ def integrand(t,r,rmu,z=z,sv=sv,b=b):
 
         res = 0
         res_ = nquad(first_integrand, [[zeros(n), zeros(n+1)]], opts=options)
-        assert np.abs(res_[1]/res_[0]) < 1e-3, f"too much error {res_[1]/res_[0]:.3e}"
+        assert np.abs(res_[1]/res_[0]) < 1e-3, f"too much error {res_[1]/res_[0]:.3e}, n={n}"
         res += res_[0]
         n += 1
 
         res_ = nquad(first_integrand, [[zeros(n), zeros(n+1)]], opts=options)
-        assert np.abs(res_[1]/res_[0]) < 1e-3, f"too much error {res_[1]/res_[0]:.3e}"
+        assert np.abs(res_[1]/res_[0]) < 1e-3, f"too much error {res_[1]/res_[0]:.3e}, n={n}"
         res += res_[0]
         n += 1
 
@@ -134,25 +140,107 @@ def Xi(r, rmu, z=z, sv=sv, b=b):
     x = A + np.arange(N)*h/4 #grid position
     for i in range(n):
         w[4*i:4*i+5] += np.array([7, 32, 12, 32, 7]) * h/90
-    f = np.array([integrand(q, r=r,rmu=rmu) for q in x])
+
+    results = {}
+    for sto, X in yt.parallel_objects(x, args.c, dynamic=True, storage=results):
+
+        j = np.where(x==X)[0][0]
+
+        sto.result = integrand(X, r=r,rmu=rmu)
+        sto.result_id = f'{j}'
+    
+    f = np.array([results[f"{i}"] for i in range(N)])
+    #f = np.array([integrand(q, r=r,rmu=rmu) for q in x])
     #print(f)
     #print(val)
-    print((w*f).sum())
+    if is_root:
+        print((w*f).sum())
     return (w*f).sum()
 
-def XiIntegral(R, s, R1=0):
+def XiIntegral(R, s, R1=1e-3, RSD=True):
     
     # The weight needs a 2pi from the azimuthal integral
     weight = lambda r, t: 2*np.pi*TwoEllipsoidCaps(r, t, s, R)
 
-    integrand = lambda r, t: weight(r,t)*Xi(r,np.cos(t))*r*np.sin(t)
+    if RSD:
+        print(RSD)
+        integrand = lambda r, t: weight(r,t)*Xi(r,np.cos(t))*r*np.sin(t)
+    else:
+        integrand = lambda r, t: weight(r,t)*quijote.correlationFunction(r,z)
 
     dlims = lambda t: [R1, (2*np.sqrt(2)*R*s)/np.sqrt(1 + s**3 + np.cos(2*t) - s**3*np.cos(2*t))]
 
-    return nquad(integrand, [dlims, [0, np.pi]])[0]
+    opts = {'limit': 1000}
+    return nquad(integrand, [dlims, [0, np.pi]],opts=opts)[0]
 
-print(XiIntegral(50,1.2))
+
+CDFs = []; pCDFs = []
+twoCDFs = []; twopCDFs = []
+
+S = [1.0, 0.98, 0.99, 1.01, 1.02]
+for s in S:
+    R = np.logspace(0,np.log10(30),100)
+    RSD = False
+    xis = {}
+    for sto, r in yt.parallel_objects(R, args.cg, dynamic=True, storage=xis):
+
+        j = np.where(R==r)[0][0]
+        sto.result = XiIntegral(r, s, RSD=RSD)
+        sto.result_id = f"{j}"
+
+    results = np.array([xis[f"{j}"] for j in range(len(R))])
+
+    nbar = 1e5/1e9
+
+    onenn = 1 - np.exp(-nbar*4*np.pi*R**3/3 + nbar*nbar/2*results)
+    onennpcdf = np.minimum(onenn, 1-onenn)
+
+    twonn = onenn - np.exp(-nbar*4*np.pi*R**3/3 + nbar*nbar/2*results) * (nbar*4*np.pi*R**3/3 - nbar*nbar*results)
+    twonnpcdf = np.minimum(twonn, 1-twonn)
+
+    CDFs.append(onenn); pCDFs.append(onennpcdf); twoCDFs.append(twonn); twopCDFs.append(twonnpcdf); 
+
+
+if is_root:
+
+    fig, ax = plt.subplots(2,2,figsize=(20,16))
+
+    for q, pcdf in enumerate(pCDFs):
+        ax[0][0].loglog(R, pcdf, '.-', label=f"{S[q]:.2f}")
+    ax[0][0].set_ylim(1e-3)
+    ax[0][0].set_xlabel(r'Distance $h^{-1}$ Mpc')
+    ax[0][0].set_title('Peaked 1NN-CDFs')
+    ax[0][0].set_ylabel(r'Peaked CDF')
+    ax[0][0].legend()
+
+    for q, cdf in enumerate(CDFs[1:],1):
+        ax[0][1].semilogx(R, cdf-CDFs[0],f'C{q}.-', label=f"{S[q]:.2f}")
+    ax[0][1].set_title('1NN Residual')
+    ax[0][1].set_xlabel(r'Distance $h^{-1}$ Mpc')
+    ax[0][1].set_ylabel(r'Peaked CDF Residual')
+    ax[0][1].legend()
+
+    for q, pcdf in enumerate(twopCDFs):
+        ax[1][0].loglog(R, pcdf, '.-', label=f"{S[q]:.2f}")
+    ax[1][0].set_ylim(1e-3)
+    ax[1][0].set_xlabel(r'Distance $h^{-1}$ Mpc')
+    ax[1][0].set_title('Peaked 2NN-CDFs')
+    ax[1][0].set_ylabel(r'Peaked CDF')
+    ax[1][0].legend()
+
+    for q, cdf in enumerate(twoCDFs[1:],1):
+        ax[1][1].semilogx(R, cdf-twoCDFs[0],f'C{q}.-', label=f"{S[q]:.2f}")
+    ax[1][1].set_title('2NN Residual')
+    ax[1][1].set_xlabel(r'Distance $h^{-1}$ Mpc')
+    ax[1][1].set_ylabel(r'Peaked CDF Residual')
+    ax[1][1].legend()
+
+
+    plt.savefig('onennpcdf.png')
+
+#print(XiIntegral(30,1.2))
 assert False
+
 for sto, n in yt.parallel_objects(range(xf*xf)[::-1], 0, storage=storage, dynamic=True):
         
         i = n//xf
