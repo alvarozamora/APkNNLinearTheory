@@ -6,6 +6,7 @@ from scipy.integrate import nquad
 from scipy.special import jv, jn_zeros
 import yt; yt.enable_parallelism(); print(yt.is_root()); is_root = yt.is_root()
 from mpmath import quadosc
+from scipy.special import spherical_jn as spjn
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--cg', type=int, default=5)
@@ -24,7 +25,7 @@ plt.rcParams['axes.labelsize']  = 15
 
 # Define Quijote Cosmology
 Om0 = 0.3175
-quijote = {'flat': True, 'H0': 67.11, 'Om0': 0.3175, 'Ob0': 0.049, 'sigma8': 0.834, 'ns': 0.9624, }
+quijote = {'flat': True, 'H0': 67.11, 'Om0': Om0, 'Ob0': 0.049, 'sigma8': 0.834, 'ns': 0.9624, }
 cosmology.addCosmology('Quijote', quijote)
 quijote = cosmology.setCosmology('Quijote')
 
@@ -52,6 +53,7 @@ def DoubleSphereVolume(R,d):
 z = 1.
 sv = 0.
 b = 1.
+f = Om0**0.6 / b
 
 def integrand(t,r,rmu,z=z,sv=sv,b=b):
     
@@ -82,25 +84,25 @@ def integrand(t,r,rmu,z=z,sv=sv,b=b):
     
     period = np.array([np.diff(np.sort(coszeros)).mean(), np.diff(np.sort(j0zeros)).mean()])
     period = np.min(period[np.invert(np.isnan(period))])
-    zeros = lambda n: n*period/8
+    zeros = lambda n: n*period/2
     #if is_root:
         #print(f"integrating theta={t:.4f}")
 
     n = 0
     eps = 100
     result = 0
-    while eps > 1e-5:
+    while eps > 1e-6:
 
         options = {'limit': 1000}
 
         res = 0
         res_ = nquad(first_integrand, [[zeros(n), zeros(n+1)]], opts=options)
-        assert np.abs(res_[1]/res_[0]) < 1e-3, f"too much error {res_[1]/res_[0]:.3e}, n={n}"
+        assert np.abs(res_[1]/res_[0]) < 1e-4, f"too much error {res_[1]/res_[0]:.3e}, n={n}"
         res += res_[0]
         n += 1
 
         res_ = nquad(first_integrand, [[zeros(n), zeros(n+1)]], opts=options)
-        assert np.abs(res_[1]/res_[0]) < 1e-3, f"too much error {res_[1]/res_[0]:.3e}, n={n}"
+        assert np.abs(res_[1]/res_[0]) < 1e-4, f"too much error {res_[1]/res_[0]:.3e}, n={n}"
         res += res_[0]
         n += 1
 
@@ -157,30 +159,72 @@ def Xi(r, rmu, z=z, sv=sv, b=b):
         print((w*f).sum())
     return (w*f).sum()
 
-def XiIntegral(R, s, R1=1e-3, RSD=True):
+
+# Donghui Jeong Liang Dai, Marc Kamionkowski, and Alexander S. Szalay 2014 (Eq 2, 3)
+def XiRSDApprox(r, rmu, z=z, sv=sv, b=b):
+
+    # Define Legendre Polynomials
+    P0 = lambda x: 1
+    P2 = lambda x: ( 3*x**2 - 1)/2
+    P4 = lambda x: (35*x**4 - 30*x**2 + 3)/8
+
+    # Compute Other Moments
+    # First: Power Spectrum
+    Pk = lambda k: quijote.matterPowerSpectrum(k=k, z=z)
+    def xin(r, n):
+        
+        if n != 0:
+
+            integrand = lambda k: k**2 * Pk(k) / (2 * np.pi**2) * spjn(n, k*r)  # TODO: Check Normalization
+            result = nquad(integrand, [[0, np.inf]],opts={'limit': 100})
+
+            #assert np.abs(result[1]/result[0]) < 1e-4, f"Too much integ error ({np.abs(result[1]/result[0]):.3e})"
+            #print(f"xin integ error is {np.abs(result[1]/result[0]):.3e}")
+
+            return result[0]
+        else:
+            return quijote.correlationFunction(r,z)
+
+    result = (b*b + 2/3*b*f + f*f/5)*xin(r, 0)*P0(rmu) - (4/3*b*f + 4/7*f*f)*xin(r, 2)*P2(rmu) + 8/35*f*f*xin(r,4)*P4(rmu)
+
+    return result
+    
+
+        
+
+
+def XiIntegral(R, s, R1=1e-3, RSD=2, T = [0, np.pi]):
     
     # The weight needs a 2pi from the azimuthal integral
     weight = lambda r, t: 2*np.pi*TwoEllipsoidCaps(r, t, s, R)
 
-    if RSD:
-        print(RSD)
+    if RSD == 0:
+        if is_root:
+            print(RSD)
         integrand = lambda r, t: weight(r,t)*Xi(r,np.cos(t))*r*np.sin(t)
+    elif RSD == 2:
+        if is_root:
+            print("Using Dipole + Quadruple O(f^2) Approximation")
+        integrand = lambda r, t: weight(r,t)*XiRSDApprox(r,np.cos(t))*r*np.sin(t)
     else:
         integrand = lambda r, t: weight(r,t)*quijote.correlationFunction(r,z)
 
     dlims = lambda t: [R1, (2*np.sqrt(2)*R*s)/np.sqrt(1 + s**3 + np.cos(2*t) - s**3*np.cos(2*t))]
 
     opts = {'limit': 1000}
-    return nquad(integrand, [dlims, [0, np.pi]],opts=opts)[0]
+    return nquad(integrand, [dlims, T],opts=opts)[0]
 
 
 CDFs = []; pCDFs = []
 twoCDFs = []; twopCDFs = []
 
 S = [1.0, 0.98, 0.99, 1.01, 1.02]
+
 for s in S:
+    if is_root:
+        print(f"Computing s = {s:.2f}")
     R = np.logspace(0,np.log10(30),100)
-    RSD = False
+    RSD = 2
     xis = {}
     for sto, r in yt.parallel_objects(R, args.cg, dynamic=True, storage=xis):
 
@@ -238,9 +282,10 @@ if is_root:
 
     plt.savefig('onennpcdf.png')
 
-#print(XiIntegral(30,1.2))
-assert False
 
+
+'''
+# This block tests Xi and produces a 2D plot
 for sto, n in yt.parallel_objects(range(xf*xf)[::-1], 0, storage=storage, dynamic=True):
         
         i = n//xf
@@ -277,4 +322,4 @@ if yt.is_root():
     plt.ylabel(r'Line-of-Sight Distance ($h^{-1}$ Mpc)')
     plt.colorbar()
     plt.savefig('CorrFunc.png',dpi=230)
-        
+'''
