@@ -4,7 +4,7 @@ from colossus.cosmology import cosmology
 from scipy.integrate import tplquad, dblquad, quad, simps
 from scipy.integrate import nquad
 from scipy.special import jv, jn_zeros
-import yt; yt.enable_parallelism(); print(yt.is_root()); is_root = yt.is_root()
+import yt; yt.enable_parallelism(); print(yt.is_root()); is_root = yt.is_root(); from yt.config import ytcfg; cfg_option = "__topcomm_parallel_rank"; cpu_id = ytcfg.getint("yt", cfg_option)
 from mpmath import quadosc
 from scipy.special import spherical_jn as spjn
 import argparse
@@ -12,8 +12,6 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--cg', type=int, default=5)
 parser.add_argument('-c', type=int, default=1)
 args = parser.parse_args()
-
-print(args.cg, args.c)
 
 # Custom Plot Formatting
 plt.rcParams['figure.facecolor'] ='white'
@@ -144,7 +142,7 @@ def Xi(r, rmu, z=z, sv=sv, b=b):
         w[4*i:4*i+5] += np.array([7, 32, 12, 32, 7]) * h/90
 
     results = {}
-    for sto, X in yt.parallel_objects(x, args.c, dynamic=True, storage=results):
+    for sto, X in yt.parallel_objects(x, args.c, dynamic=False, storage=results):
 
         j = np.where(x==X)[0][0]
 
@@ -176,12 +174,22 @@ def XiRSDApprox(r, rmu, z=z, sv=sv, b=b):
         if n != 0:
 
             integrand = lambda k: k**2 * Pk(k) / (2 * np.pi**2) * spjn(n, k*r)  # TODO: Check Normalization
-            result = nquad(integrand, [[0, np.inf]],opts={'limit': 100})
-
-            #assert np.abs(result[1]/result[0]) < 1e-4, f"Too much integ error ({np.abs(result[1]/result[0]):.3e})"
+            
+            # integrate function
+            #result = nquad(integrand, [[1e-10, 1e10]],opts={'limit': 1000})
+            #assert np.abs(result[1]/result[0]) < 1e-3, f"Too much integ error ({np.abs(result[1]/result[0]):.3e})"
             #print(f"xin integ error is {np.abs(result[1]/result[0]):.3e}")
+            #return result[0]
 
-            return result[0]
+            # integrate log-grid
+            # smaller r's result in larger periods for k --> need wider grid
+            # r in Mpc/h
+            Npts = 10000
+            kgrid = np.sort(np.concatenate([np.logspace(-7,1-np.log10(r), Npts), np.linspace(1e-5,2000/r, Npts)]))
+            integrand_grid = integrand(kgrid)
+            result = simps(integrand_grid, kgrid)
+            return result
+            
         else:
             return quijote.correlationFunction(r,z)
 
@@ -198,7 +206,7 @@ def XiIntegral(R, s, R1=1e-3, RSD=2, T = [0, np.pi]):
     # The weight needs a 2pi from the azimuthal integral
     weight = lambda r, t: 2*np.pi*TwoEllipsoidCaps(r, t, s, R)
 
-    if RSD == 0:
+    if RSD == 1:
         if is_root:
             print(RSD)
         integrand = lambda r, t: weight(r,t)*Xi(r,np.cos(t))*r*np.sin(t)
@@ -206,8 +214,10 @@ def XiIntegral(R, s, R1=1e-3, RSD=2, T = [0, np.pi]):
         if is_root:
             print("Using Dipole + Quadruple O(f^2) Approximation")
         integrand = lambda r, t: weight(r,t)*XiRSDApprox(r,np.cos(t))*r*np.sin(t)
-    else:
+    elif RSD == 0:
         integrand = lambda r, t: weight(r,t)*quijote.correlationFunction(r,z)
+    elif RSD not in [0,1,2]:
+        assert False, "invalid RSD mode"
 
     dlims = lambda t: [R1, (2*np.sqrt(2)*R*s)/np.sqrt(1 + s**3 + np.cos(2*t) - s**3*np.cos(2*t))]
 
@@ -215,34 +225,49 @@ def XiIntegral(R, s, R1=1e-3, RSD=2, T = [0, np.pi]):
     return nquad(integrand, [dlims, T],opts=opts)[0]
 
 
-CDFs = []; pCDFs = []
-twoCDFs = []; twopCDFs = []
+
 
 S = [1.0, 0.98, 0.99, 1.01, 1.02]
+R = np.logspace(0,np.log10(30),100)
+RSD = 2
 
-for s in S:
-    if is_root:
-        print(f"Computing s = {s:.2f}")
-    R = np.logspace(0,np.log10(30),100)
-    RSD = 2
-    xis = {}
-    for sto, r in yt.parallel_objects(R, args.cg, dynamic=True, storage=xis):
+results = []
 
-        j = np.where(R==r)[0][0]
-        sto.result = XiIntegral(r, s, RSD=RSD)
-        sto.result_id = f"{j}"
+params = [(s, r) for s in S for r in R]
 
-    results = np.array([xis[f"{j}"] for j in range(len(R))])
+xis = {}
+for sto, (s, r) in yt.parallel_objects(params, args.cg, dynamic=True, storage=xis):
 
-    nbar = 1e5/1e9
+    j = params.index((s,r))
 
-    onenn = 1 - np.exp(-nbar*4*np.pi*R**3/3 + nbar*nbar/2*results)
-    onennpcdf = np.minimum(onenn, 1-onenn)
+    print(f"Rank {cpu_id} is working on item {j}, which is r={r:.3f} Mpc/h for s={s:.3f}")
 
-    twonn = onenn - np.exp(-nbar*4*np.pi*R**3/3 + nbar*nbar/2*results) * (nbar*4*np.pi*R**3/3 - nbar*nbar*results)
-    twonnpcdf = np.minimum(twonn, 1-twonn)
+    sto.result = XiIntegral(r, s, RSD=RSD)
+    sto.result_id = f"{j}"
 
-    CDFs.append(onenn); pCDFs.append(onennpcdf); twoCDFs.append(twonn); twopCDFs.append(twonnpcdf); 
+    print(f"Rank {cpu_id} finished")
+
+
+CDFs = np.empty((len(R),len(S))); pCDFs = np.empty((len(R),len(S)))
+twoCDFs = np.empty((len(R),len(S))); twopCDFs = np.empty((len(R),len(S)))
+
+if is_root:
+    for s in range(len(S)):
+
+        #results = np.array([xis[f"{len(R)*s + j}"] for j in range(len(R))])
+        results = np.array([xis[len(R)*s + j] for j in range(len(R))])
+
+        nbar = 1e5/1e9
+
+        onenn = 1 - np.exp(-nbar*4*np.pi*R**3/3 + nbar*nbar/2*results)
+        onennpcdf = np.minimum(onenn, 1-onenn)
+
+        twonn = onenn - np.exp(-nbar*4*np.pi*R**3/3 + nbar*nbar/2*results) * (nbar*4*np.pi*R**3/3 - nbar*nbar*results)
+        twonnpcdf = np.minimum(twonn, 1-twonn)
+
+        CDFs[:,s]= onenn; pCDFs[:,s]= onennpcdf; twoCDFs[:,s] = twonn; twopCDFs[:, s] = twonnpcdf; 
+
+CDFs = CDFs.T; pCDFs = pCDFs.T; twoCDFs = twoCDFs.T; twopCDFs = twopCDFs.T;
 
 
 if is_root:
