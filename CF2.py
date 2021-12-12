@@ -48,10 +48,10 @@ def DoubleSphereVolume(R,d):
     else:
         return 0
 
-z = 1.
-sv = 0.
-b = 1.
-f = Om0**0.6 / b
+z = 0.5
+sv = 0
+b = 4.
+f = Om0**0.6
 
 def integrand(t,r,rmu,z=z,sv=sv,b=b):
     
@@ -229,7 +229,7 @@ def XiIntegral(R, s, R1=1e-3, RSD=2, T = [0, np.pi]):
 
 S = [1.0, 0.98, 0.99, 1.01, 1.02]
 R = np.logspace(0,np.log10(30),100)
-RSD = 2
+RSD = 0
 
 results = []
 
@@ -276,6 +276,7 @@ if is_root:
 
     for q, pcdf in enumerate(pCDFs):
         ax[0][0].loglog(R, pcdf, '.-', label=f"{S[q]:.2f}")
+        np.savez(f'pcdf_{RSD}_{q}',R=R,pcdf=pcdf)
     ax[0][0].set_ylim(1e-3)
     ax[0][0].set_xlabel(r'Distance $h^{-1}$ Mpc')
     ax[0][0].set_title('Peaked 1NN-CDFs')
@@ -305,7 +306,7 @@ if is_root:
     ax[1][1].legend()
 
 
-    plt.savefig('onennpcdf.png')
+    plt.savefig(f'onennpcdf_{RSD}.png')
 
 
 
