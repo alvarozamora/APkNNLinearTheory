@@ -50,7 +50,7 @@ def DoubleSphereVolume(R,d):
 
 z = 0.5
 sv = 0
-b = 4.
+b = 2.66
 f = Om0**0.6
 
 def integrand(t,r,rmu,z=z,sv=sv,b=b):
@@ -229,7 +229,7 @@ def XiIntegral(R, s, R1=1e-3, RSD=2, T = [0, np.pi]):
 
 S = [1.0, 0.98, 0.99, 1.01, 1.02]
 R = np.logspace(0,np.log10(30),100)
-RSD = 0
+RSD = 2
 
 results = []
 
