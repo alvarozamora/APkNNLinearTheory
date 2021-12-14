@@ -48,9 +48,9 @@ def DoubleSphereVolume(R,d):
     else:
         return 0
 
-z = 0.5
+z = 1.0
 sv = 0
-b = 2.66
+b = 3.3
 f = Om0**0.6
 
 def integrand(t,r,rmu,z=z,sv=sv,b=b):
@@ -171,7 +171,7 @@ def XiRSDApprox(r, rmu, z=z, sv=sv, b=b):
     Pk = lambda k: quijote.matterPowerSpectrum(k=k, z=z)
     def xin(r, n):
         
-        if n != 0:
+        if True:
 
             integrand = lambda k: k**2 * Pk(k) / (2 * np.pi**2) * spjn(n, k*r)  # TODO: Check Normalization
             
@@ -203,19 +203,19 @@ def XiRSDApprox(r, rmu, z=z, sv=sv, b=b):
 
 def XiIntegral(R, s, R1=1e-3, RSD=2, T = [0, np.pi]):
     
-    # The weight needs a 2pi from the azimuthal integral
+    # We add a 2*pi here from the azimuthal integral that would need to be done in the following lines
     weight = lambda r, t: 2*np.pi*TwoEllipsoidCaps(r, t, s, R)
 
     if RSD == 1:
         if is_root:
             print(RSD)
-        integrand = lambda r, t: weight(r,t)*Xi(r,np.cos(t))*r*np.sin(t)
+        integrand = lambda r, t: weight(r,t)*Xi(r,np.cos(t)) * r*r*np.sin(t)
     elif RSD == 2:
         if is_root:
             print("Using Dipole + Quadruple O(f^2) Approximation")
-        integrand = lambda r, t: weight(r,t)*XiRSDApprox(r,np.cos(t))*r*np.sin(t)
+        integrand = lambda r, t: weight(r,t)*XiRSDApprox(r,np.cos(t)) * r*r*np.sin(t)
     elif RSD == 0:
-        integrand = lambda r, t: weight(r,t)*quijote.correlationFunction(r,z)
+        integrand = lambda r, t: weight(r,t)*quijote.correlationFunction(r,z) * r*r*np.sin(t)
     elif RSD not in [0,1,2]:
         assert False, "invalid RSD mode"
 
@@ -228,7 +228,7 @@ def XiIntegral(R, s, R1=1e-3, RSD=2, T = [0, np.pi]):
 
 
 S = [1.0, 0.98, 0.99, 1.01, 1.02]
-R = np.logspace(0,np.log10(30),100)
+R = np.logspace(np.log10(2),np.log10(35),100)
 RSD = 2
 
 results = []
@@ -276,7 +276,7 @@ if is_root:
 
     for q, pcdf in enumerate(pCDFs):
         ax[0][0].loglog(R, pcdf, '.-', label=f"{S[q]:.2f}")
-        np.savez(f'pcdf_{RSD}_{q}',R=R,pcdf=pcdf)
+        np.savez(f'pcdf_{RSD}_{q}_z={z:.2f}',R=R,pcdf=pcdf, cdf=CDFs[q])
     ax[0][0].set_ylim(1e-3)
     ax[0][0].set_xlabel(r'Distance $h^{-1}$ Mpc')
     ax[0][0].set_title('Peaked 1NN-CDFs')
@@ -306,7 +306,7 @@ if is_root:
     ax[1][1].legend()
 
 
-    plt.savefig(f'onennpcdf_{RSD}.png')
+    plt.savefig(f'onennpcdf_{RSD}_z={z:.2f}.png')
 
 
 
