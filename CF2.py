@@ -171,7 +171,7 @@ def XiRSDApprox(r, rmu, z=z, sv=sv, b=b):
     Pk = lambda k: quijote.matterPowerSpectrum(k=k, z=z)
     def xin(r, n):
         
-        if True:
+        if n!=0:
 
             integrand = lambda k: k**2 * Pk(k) / (2 * np.pi**2) * spjn(n, k*r)  # TODO: Check Normalization
             
@@ -185,7 +185,7 @@ def XiRSDApprox(r, rmu, z=z, sv=sv, b=b):
             # smaller r's result in larger periods for k --> need wider grid
             # r in Mpc/h
             Npts = 10000
-            kgrid = np.sort(np.concatenate([np.logspace(-7,1-np.log10(r), Npts), np.linspace(1e-5,2000/r, Npts)]))
+            kgrid = np.sort(np.concatenate([np.logspace(-7,1-np.log10(r), Npts), np.linspace(1e-5,100, Npts)]))
             integrand_grid = integrand(kgrid)
             result = simps(integrand_grid, kgrid)
             return result
