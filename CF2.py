@@ -171,7 +171,7 @@ def XiRSDApprox(r, rmu, z=z, sv=sv, b=b):
     Pk = lambda k: quijote.matterPowerSpectrum(k=k, z=z)
     def xin(r, n):
         
-        if n!=0:
+        if n!=0 or True:
 
             integrand = lambda k: k**2 * Pk(k) / (2 * np.pi**2) * spjn(n, k*r)  # TODO: Check Normalization
             
@@ -185,9 +185,10 @@ def XiRSDApprox(r, rmu, z=z, sv=sv, b=b):
             # smaller r's result in larger periods for k --> need wider grid
             # r in Mpc/h
             Npts = 10000
-            kgrid = np.sort(np.concatenate([np.logspace(-7,1-np.log10(r), Npts), np.linspace(1e-5,100, Npts)]))
+            kgrid = np.sort(np.concatenate([np.logspace(-6,0,Npts), np.linspace(1 + 1/Npts, np.maximum(50/r,20), Npts)]))
             integrand_grid = integrand(kgrid)
             result = simps(integrand_grid, kgrid)
+            assert not np.isnan(result), "xin result is nan"
             return result
             
         else:
@@ -215,22 +216,43 @@ def XiIntegral(R, s, R1=1e-3, RSD=2, T = [0, np.pi]):
             print("Using Dipole + Quadruple O(f^2) Approximation")
         integrand = lambda r, t: weight(r,t)*XiRSDApprox(r,np.cos(t)) * r*r*np.sin(t)
     elif RSD == 0:
-        integrand = lambda r, t: weight(r,t)*quijote.correlationFunction(r,z) * r*r*np.sin(t)
+        integrand = lambda r, t: weight(r,t)*b*b*quijote.correlationFunction(r,z) * r*r*np.sin(t)
     elif RSD not in [0,1,2]:
         assert False, "invalid RSD mode"
 
     dlims = lambda t: [R1, (2*np.sqrt(2)*R*s)/np.sqrt(1 + s**3 + np.cos(2*t) - s**3*np.cos(2*t))]
 
-    opts = {'limit': 1000}
-    return nquad(integrand, [dlims, T],opts=opts)[0]
+    #result = nquad(integrand, [dlims, T],opts={'limit': 1000}) # 2D Integral
+
+    # 1D Integral, other done w/ simps
+    def new_integrand(t): 
+        lims = dlims(t)
+        rgrid = np.linspace(lims[0], lims[1], 1000) # Linear Grid
+        #rgrid = np.logspace(np.log10(lims[0]), np.log10(lims[1]), 1000) # Logarithmic Grid
+        result = simps([integrand(rg, t) for rg in rgrid], rgrid)
+        assert not np.isnan(result), "new_integrand result is nan"
+        return result
+    
+    # Functional integral
+    #result = quad(new_integrand, *T) 
+    #print(f"Xi({R:.2f}) Integral Error is {np.abs(result[1]/result[0]):.3e}")
+    #return result[0]
+
+    # Simpsons Rule
+    thgrid = np.linspace(0, np.pi, 200)
+    result = simps([new_integrand(th) for th in thgrid], thgrid)
+    return result
+    
+
+    
 
 
 
 
-S = [1.0, 0.98, 0.99, 1.01, 1.02]
-R = np.logspace(np.log10(2),np.log10(35),100)
+S = [1.0]#, 0.98, 0.99, 1.01, 1.02]
+n = 4
+R = np.logspace(np.log10(2),np.log10(35),100)*10**((5-n)/3)
 RSD = 2
-
 results = []
 
 params = [(s, r) for s in S for r in R]
@@ -257,9 +279,14 @@ if is_root:
         #results = np.array([xis[f"{len(R)*s + j}"] for j in range(len(R))])
         results = np.array([xis[len(R)*s + j] for j in range(len(R))])
 
-        nbar = 1e5/1e9
+        nbar = 10**n/1e9
 
         onenn = 1 - np.exp(-nbar*4*np.pi*R**3/3 + nbar*nbar/2*results)
+
+        mnV = -nbar*4*np.pi*R**3/3
+        nbsqxiover2 = nbar*nbar/2*results
+        if s==0:
+            np.savez(f'terms_{RSD}_z={z:.2f}_n={n}', mnV=mnV, nbsqxiover2=nbsqxiover2)
         onennpcdf = np.minimum(onenn, 1-onenn)
 
         twonn = onenn - np.exp(-nbar*4*np.pi*R**3/3 + nbar*nbar/2*results) * (nbar*4*np.pi*R**3/3 - nbar*nbar*results)
@@ -276,7 +303,7 @@ if is_root:
 
     for q, pcdf in enumerate(pCDFs):
         ax[0][0].loglog(R, pcdf, '.-', label=f"{S[q]:.2f}")
-        np.savez(f'pcdf_{RSD}_{q}_z={z:.2f}',R=R,pcdf=pcdf, cdf=CDFs[q])
+        np.savez(f'pcdf_{RSD}_{q}_n={n}_z={z:.2f}',R=R,pcdf=pcdf, cdf=CDFs[q])
     ax[0][0].set_ylim(1e-3)
     ax[0][0].set_xlabel(r'Distance $h^{-1}$ Mpc')
     ax[0][0].set_title('Peaked 1NN-CDFs')
