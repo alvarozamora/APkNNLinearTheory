@@ -159,7 +159,7 @@ def Xi(r, rmu, z=z, sv=sv, b=b):
 
 
 # Donghui Jeong Liang Dai, Marc Kamionkowski, and Alexander S. Szalay 2014 (Eq 2, 3)
-def XiRSDApprox(r, rmu, z=z, sv=sv, b=b):
+def XiRSDApprox(r, rmu, z=z, sv=sv, b=b, separateterms=False):
 
     # Define Legendre Polynomials
     P0 = lambda x: 1
@@ -194,9 +194,23 @@ def XiRSDApprox(r, rmu, z=z, sv=sv, b=b):
         else:
             return quijote.correlationFunction(r,z)
 
-    result = (b*b + 2/3*b*f + f*f/5)*xin(r, 0)*P0(rmu) - (4/3*b*f + 4/7*f*f)*xin(r, 2)*P2(rmu) + 8/35*f*f*xin(r,4)*P4(rmu)
+    if not separateterms:
+        result = (b*b + 2/3*b*f + f*f/5)*xin(r, 0)*P0(rmu) - (4/3*b*f + 4/7*f*f)*xin(r, 2)*P2(rmu) + 8/35*f*f*xin(r, 4)*P4(rmu)
 
-    return result
+        return result
+    else:
+        
+        # Only Compute Power Spectrum Moments Once
+        xi0 = xin(r, 0)
+        xi2 = xin(r, 2)
+        xi4 = xin(r, 4)
+
+        # Squared, Linear, and Constant terms (with respect to bias parameter)
+        b2term = b*b*(xi0*P0(rmu))
+        b1term = b*(2/3*f*xi0*P0(rmu) + 4/3*f*xi2*P2(rmu))
+        b0term = f*f/5*xi0*P0(rmu) + 4/7*f*f*xi2*P2(rmu) + 8/35*f*f*xi4*P4(rmu)
+
+        return b2term, b1term, b0term
     
 
         
@@ -250,7 +264,7 @@ def XiIntegral(R, s, R1=1e-3, RSD=2, T = [0, np.pi]):
 
 
 S = [1.0]#, 0.98, 0.99, 1.01, 1.02]
-n = 4
+n = 3
 R = np.logspace(np.log10(2),np.log10(35),100)*10**((5-n)/3)
 RSD = 2
 results = []
