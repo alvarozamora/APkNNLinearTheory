@@ -63,7 +63,7 @@ if __name__ == "__main__":
     print(subb1s_10[:5])
 
     plt.figure()
-    plt.plot([nb2.mean(),nb2.mean()],[0,1.5],'k--',alpha=0.7,label='1')
+    plt.plot([nb2.mean(),nb2.mean()],[0,60],'k--', linewidth=1, alpha=0.7,label='1')
     plt.hist(subb1s_10, bins=np.arange(3,4,0.01), density=True,label='10',alpha=0.3)
     plt.hist(subb1s_100, bins=np.arange(3,4,0.01), density=True,label='100',alpha=0.3)
     plt.legend(title='Subsamples')
