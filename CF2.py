@@ -8,6 +8,7 @@ import yt; yt.enable_parallelism(); print(yt.is_root()); is_root = yt.is_root();
 from mpmath import quadosc
 from scipy.special import spherical_jn as spjn
 import argparse
+from scipy.interpolate import interpn
 parser = argparse.ArgumentParser()
 parser.add_argument('--cg', type=int, default=5)
 parser.add_argument('-c', type=int, default=1)
@@ -47,12 +48,23 @@ def DoubleSphereVolume(R,d):
         return np.pi/12 * (d - 2*R)**2 * (d + 4*R)
     else:
         return 0
+    
+
+coneweightfunction = np.load('WeightFunction.npy')
+def ConeWeightFunction(r, t, alpha=np.pi/3):
+    # These were the grids with which the array was generated
+    ds = np.linspace(0,2,100)
+    ts = np.linspace(0,np.pi,100)
+    alphas = np.linspace(0, np.pi/2, 100)
+
+    x = (alpha, t, r)
+    return interpn((alphas, ts, ds), coneweightfunction, x)
 
 z = 1.0
 sv = 0
-b = 3.3 # * 0.875
+b = 3.3 # * 0.875 # This factor is used for S = 10 (TODO: VERIFY)
 #b = 3.348305028707007 * 1.01902463
-#b = 3.348305028707007 * 1.75
+b = 3.348305028707007 * 0.94
 f = Om0**0.6
 
 def integrand(t,r,rmu,z=z,sv=sv,b=b):
@@ -218,10 +230,12 @@ def XiRSDApprox(r, rmu, z=z, sv=sv, b=b, separateterms=False):
         
 
 
-def XiIntegral(R, s, R1=1e-3, RSD=2, T = [0, np.pi]):
+def XiIntegral(R, s, R1=1e-3, RSD=2, T = [0, np.pi], alpha=None):
     
     # We add a 2*pi here from the azimuthal integral that would need to be done in the following lines
     weight = lambda r, t: 2*np.pi*TwoEllipsoidCaps(r, t, s, R)
+    if alpha is not None:
+        weight = lambda r, t: ConeWeightFunction(r, t, alpha)
 
     if RSD == 1:
         if is_root:
@@ -264,92 +278,94 @@ def XiIntegral(R, s, R1=1e-3, RSD=2, T = [0, np.pi]):
 
 
 
-
-S = [1.0]#, 0.98, 0.99, 1.01, 1.02]
-n = 3
-R = np.logspace(np.log10(2),np.log10(35),100)*10**((5-n)/3)
-RSD = 0
-results = []
-
-params = [(s, r) for s in S for r in R]
-
-xis = {}
-for sto, (s, r) in yt.parallel_objects(params, args.cg, dynamic=True, storage=xis):
-
-    j = params.index((s,r))
-
-    print(f"Rank {cpu_id} is working on item {j}, which is r={r:.3f} Mpc/h for s={s:.3f}")
-
-    sto.result = XiIntegral(r, s, RSD=RSD)
-    sto.result_id = f"{j}"
-
-    print(f"Rank {cpu_id} finished")
+if __name__ == '__main__':
 
 
-CDFs = np.empty((len(R),len(S))); pCDFs = np.empty((len(R),len(S)))
-twoCDFs = np.empty((len(R),len(S))); twopCDFs = np.empty((len(R),len(S)))
+    S = [1.0]#, 0.98, 0.99, 1.01, 1.02]
+    n = 3
+    R = np.logspace(np.log10(2),np.log10(35),100)*10**((5-n)/3)
+    RSD = 2
+    results = []
 
-if is_root:
-    for s in range(len(S)):
+    params = [(s, r) for s in S for r in R]
 
-        #results = np.array([xis[f"{len(R)*s + j}"] for j in range(len(R))])
-        results = np.array([xis[len(R)*s + j] for j in range(len(R))])
+    xis = {}
+    for sto, (s, r) in yt.parallel_objects(params, args.cg, dynamic=True, storage=xis):
 
-        nbar = 10**n/1e9
+        j = params.index((s,r))
 
-        onenn = 1 - np.exp(-nbar*4*np.pi*R**3/3 + nbar*nbar/2*results)
+        print(f"Rank {cpu_id} is working on item {j}, which is r={r:.3f} Mpc/h for s={s:.3f}")
 
-        mnV = -nbar*4*np.pi*R**3/3
-        nbsqxiover2 = nbar*nbar/2*results
-        if s==0:
-            np.savez(f'terms_{RSD}_z={z:.2f}_n={n}', mnV=mnV, nbsqxiover2=nbsqxiover2)
-        onennpcdf = np.minimum(onenn, 1-onenn)
+        sto.result = XiIntegral(r, s, RSD=RSD)
+        sto.result_id = f"{j}"
 
-        twonn = onenn - np.exp(-nbar*4*np.pi*R**3/3 + nbar*nbar/2*results) * (nbar*4*np.pi*R**3/3 - nbar*nbar*results)
-        twonnpcdf = np.minimum(twonn, 1-twonn)
-
-        CDFs[:,s]= onenn; pCDFs[:,s]= onennpcdf; twoCDFs[:,s] = twonn; twopCDFs[:, s] = twonnpcdf; 
-
-CDFs = CDFs.T; pCDFs = pCDFs.T; twoCDFs = twoCDFs.T; twopCDFs = twopCDFs.T;
+        print(f"Rank {cpu_id} finished")
 
 
-if is_root:
+    CDFs = np.empty((len(R),len(S))); pCDFs = np.empty((len(R),len(S)))
+    twoCDFs = np.empty((len(R),len(S))); twopCDFs = np.empty((len(R),len(S)))
 
-    fig, ax = plt.subplots(2,2,figsize=(20,16))
+    if is_root:
+        for s in range(len(S)):
 
-    for q, pcdf in enumerate(pCDFs):
-        ax[0][0].loglog(R, pcdf, '.-', label=f"{S[q]:.2f}")
-        np.savez(f'pcdf_{RSD}_{q}_n={n}_z={z:.2f}',R=R,pcdf=pcdf, cdf=CDFs[q])
-    ax[0][0].set_ylim(1e-3)
-    ax[0][0].set_xlabel(r'Distance $h^{-1}$ Mpc')
-    ax[0][0].set_title('Peaked 1NN-CDFs')
-    ax[0][0].set_ylabel(r'Peaked CDF')
-    ax[0][0].legend()
+            #results = np.array([xis[f"{len(R)*s + j}"] for j in range(len(R))])
+            results = np.array([xis[len(R)*s + j] for j in range(len(R))])
 
-    for q, cdf in enumerate(CDFs[1:],1):
-        ax[0][1].semilogx(R, cdf-CDFs[0],f'C{q}.-', label=f"{S[q]:.2f}")
-    ax[0][1].set_title('1NN Residual')
-    ax[0][1].set_xlabel(r'Distance $h^{-1}$ Mpc')
-    ax[0][1].set_ylabel(r'Peaked CDF Residual')
-    ax[0][1].legend()
+            nbar = 10**n/1e9
 
-    for q, pcdf in enumerate(twopCDFs):
-        ax[1][0].loglog(R, pcdf, '.-', label=f"{S[q]:.2f}")
-    ax[1][0].set_ylim(1e-3)
-    ax[1][0].set_xlabel(r'Distance $h^{-1}$ Mpc')
-    ax[1][0].set_title('Peaked 2NN-CDFs')
-    ax[1][0].set_ylabel(r'Peaked CDF')
-    ax[1][0].legend()
+            onenn = 1 - np.exp(-nbar*4*np.pi*R**3/3 + nbar*nbar/2*results)
 
-    for q, cdf in enumerate(twoCDFs[1:],1):
-        ax[1][1].semilogx(R, cdf-twoCDFs[0],f'C{q}.-', label=f"{S[q]:.2f}")
-    ax[1][1].set_title('2NN Residual')
-    ax[1][1].set_xlabel(r'Distance $h^{-1}$ Mpc')
-    ax[1][1].set_ylabel(r'Peaked CDF Residual')
-    ax[1][1].legend()
+            mnV = -nbar*4*np.pi*R**3/3
+            nbsqxiover2 = nbar*nbar/2*results
+            if s==0:
+                np.savez(f'terms_{RSD}_z={z:.2f}_n={n}', mnV=mnV, nbsqxiover2=nbsqxiover2)
+            onennpcdf = np.minimum(onenn, 1-onenn)
+
+            twonn = onenn - np.exp(-nbar*4*np.pi*R**3/3 + nbar*nbar/2*results) * (nbar*4*np.pi*R**3/3 - nbar*nbar*results)
+            twonnpcdf = np.minimum(twonn, 1-twonn)
+
+            CDFs[:,s]= onenn; pCDFs[:,s]= onennpcdf; twoCDFs[:,s] = twonn; twopCDFs[:, s] = twonnpcdf; 
+
+    CDFs = CDFs.T; pCDFs = pCDFs.T; twoCDFs = twoCDFs.T; twopCDFs = twopCDFs.T;
 
 
-    plt.savefig(f'onennpcdf_{RSD}_z={z:.2f}.png')
+    if is_root:
+
+        fig, ax = plt.subplots(2,2,figsize=(20,16))
+
+        for q, pcdf in enumerate(pCDFs):
+            ax[0][0].loglog(R, pcdf, '.-', label=f"{S[q]:.2f}")
+            np.savez(f'pcdf_{RSD}_{q}_n={n}_z={z:.2f}',R=R,pcdf=pcdf, cdf=CDFs[q])
+        ax[0][0].set_ylim(1e-3)
+        ax[0][0].set_xlabel(r'Distance $h^{-1}$ Mpc')
+        ax[0][0].set_title('Peaked 1NN-CDFs')
+        ax[0][0].set_ylabel(r'Peaked CDF')
+        ax[0][0].legend()
+
+        for q, cdf in enumerate(CDFs[1:],1):
+            ax[0][1].semilogx(R, cdf-CDFs[0],f'C{q}.-', label=f"{S[q]:.2f}")
+        ax[0][1].set_title('1NN Residual')
+        ax[0][1].set_xlabel(r'Distance $h^{-1}$ Mpc')
+        ax[0][1].set_ylabel(r'Peaked CDF Residual')
+        ax[0][1].legend()
+
+        for q, pcdf in enumerate(twopCDFs):
+            ax[1][0].loglog(R, pcdf, '.-', label=f"{S[q]:.2f}")
+        ax[1][0].set_ylim(1e-3)
+        ax[1][0].set_xlabel(r'Distance $h^{-1}$ Mpc')
+        ax[1][0].set_title('Peaked 2NN-CDFs')
+        ax[1][0].set_ylabel(r'Peaked CDF')
+        ax[1][0].legend()
+
+        for q, cdf in enumerate(twoCDFs[1:],1):
+            ax[1][1].semilogx(R, cdf-twoCDFs[0],f'C{q}.-', label=f"{S[q]:.2f}")
+        ax[1][1].set_title('2NN Residual')
+        ax[1][1].set_xlabel(r'Distance $h^{-1}$ Mpc')
+        ax[1][1].set_ylabel(r'Peaked CDF Residual')
+        ax[1][1].legend()
+
+
+        plt.savefig(f'onennpcdf_{RSD}_z={z:.2f}.png')
 
 
 
