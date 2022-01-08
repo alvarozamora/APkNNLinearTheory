@@ -1,6 +1,7 @@
 import numpy as np; sq = np.sqrt
 import matplotlib.pyplot as plt
 from scipy.spatial import cKDTree as Tree
+from utils import equalsky
 
 j = 2
 subsamples = S = 10**j
@@ -8,18 +9,16 @@ subsamples = S = 10**j
 # nbar = 1e5/1e9
 #onereal = np.load('pcdf_0_0.npz')
 #onered  = np.load('pcdf_2_0.npz')
-#onereal = np.load('pcdf_0_0_n=5_z=1.00.npz')
-#onered  = np.load('pcdf_2_0_n=5_z=1.00.npz')
+#onereal = np.load('pcdf_0_0_n=5_z=1.00_alpha.npz')
+#onered  = np.load('pcdf_2_0_n=5_z=1.00_alpha.npz')
 
 # nbar = 1e4/1e9
-#onereal = np.load('pcdf_0_0_n=4_z=1.00.npz')
-#onered  = np.load('pcdf_2_0_n=4_z=1.00.npz')
 #onereal = np.load('pcdf_0_0_n=4_z=1.00_alpha.npz')
+#onered  = np.load('pcdf_2_0_n=4_z=1.00_alpha.npz')
 
 # nbar = 1e3/1e9
-#onereal = np.load('pcdf_0_0_n=3_z=1.00.npz')
-onered  = np.load('pcdf_2_0_n=3_z=1.00.npz')
 onereal = np.load('pcdf_0_0_n=3_z=1.00_alpha.npz')
+onered  = np.load('pcdf_2_0_n=3_z=1.00_alpha.npz')
 
 
 fig, axes = plt.subplots(2,2,figsize=(12,8), gridspec_kw={'height_ratios': [4, 1]})
@@ -42,22 +41,28 @@ axes[1][0].set_xlim(onereal['R'].min(),onereal['R'].max())
 axes[1][0].set_ylim(-0.005, 0.001)
 
 # Simulation
-#data = np.load('OneBox.npz') # Redshift = 0.5
-#data = np.load('OneBox_1.npz') # Redshift = 1.0
-#rpos = data['rpos']; np.random.shuffle(rpos); rpos = np.split(rpos, S)
-#pos  = data['pos' ]; np.random.shuffle( pos);  pos = np.split( pos, S)
-#rr = []; sr = []
-#Nrand = 10**5
-#for i in range(S):
-#    rtree = Tree(rpos[i], leafsize=2, compact_nodes=True, balanced_tree=True, boxsize=1000)
-#    stree = Tree( pos[i], leafsize=2, compact_nodes=True, balanced_tree=True, boxsize=1000)
-#    query = np.random.uniform(size=(Nrand,3))*1000
-#    rr_, _ = rtree.query(query, k=1); rr.append(rr_)
-#    sr_, _ = stree.query(query, k=1); sr.append(sr_)
-#reduce = rd = 1000
-#rr = np.sort(np.concatenate(rr))[::rd]
-#sr = np.sort(np.concatenate(sr))[::rd]
-#cdf = np.arange(1,S*Nrand+1)/(S*Nrand); cdf = cdf[::rd]; pcdf = np.minimum(cdf, 1-cdf)
+data = np.load('OneBox.npz') # Redshift = 0.5
+data = np.load('OneBox_1.npz') # Redshift = 1.0
+rpos = data['rpos']; np.random.shuffle(rpos); rpos = np.split(rpos, S)
+pos  = data['pos' ]; np.random.shuffle( pos);  pos = np.split( pos, S)
+rr = []; sr = []
+Nrand = 10**5
+for i in range(S):
+   rtree = Tree(rpos[i], leafsize=16, compact_nodes=True, balanced_tree=True, boxsize=1000)
+   stree = Tree( pos[i], leafsize=16, compact_nodes=True, balanced_tree=True, boxsize=1000)
+   query = np.random.uniform(size=(Nrand,3))*1000
+   rr_, rids = rtree.query(query, k=16); 
+   sr_, sids = stree.query(query, k=16); 
+
+   _, rr_ = equalsky(rpos[i], query, rr_, rids, k=1, bs=1000, verb=True) # discard perpendicular (band), keep cone
+   _, sr_ = equalsky( pos[i], query, sr_, rids, k=1, bs=1000, verb=True) # 
+
+   rr.append(rr_)
+   sr.append(sr_)
+reduce = rd = 100
+rr = np.sort(np.concatenate(rr))[::rd]
+sr = np.sort(np.concatenate(sr))[::rd]
+cdf = np.arange(1,S*Nrand+1)/(S*Nrand); cdf = cdf[::rd]; pcdf = np.minimum(cdf, 1-cdf)
 
 # Load avg CDFs
 data = np.load('final_cdf.npz')
