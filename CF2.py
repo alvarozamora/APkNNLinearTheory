@@ -56,9 +56,13 @@ def ConeWeightFunction(r, t, alpha=np.pi/3):
     ds = np.linspace(0,2,100)
     ts = np.linspace(0,np.pi,100)
     alphas = np.linspace(0, np.pi/2, 100)
-
     x = (alpha, t, r)
-    return interpn((alphas, ts, ds), coneweightfunction, x)
+    if r < 2:
+        fraction = interpn((alphas, ts, ds), coneweightfunction, x)[0]  # fraction of points still in cone
+        doubleconevolume = 4 * np.pi / 3 * (1 - np.cos(alpha))          # dimensionless, i.e. R = 1
+        return fraction * doubleconevolume
+    else:
+        return 0 
 
 z = 1.0
 sv = 0
@@ -156,7 +160,7 @@ def Xi(r, rmu, z=z, sv=sv, b=b):
         w[4*i:4*i+5] += np.array([7, 32, 12, 32, 7]) * h/90
 
     results = {}
-    for sto, X in yt.parallel_objects(x, args.c, dynamic=False, storage=results):
+    for sto, X in yt.parallel_objects(x, args.c, dynamic=True, storage=results):
 
         j = np.where(x==X)[0][0]
 
@@ -233,9 +237,10 @@ def XiRSDApprox(r, rmu, z=z, sv=sv, b=b, separateterms=False):
 def XiIntegral(R, s, R1=1e-3, RSD=2, T = [0, np.pi], alpha=None):
     
     # We add a 2*pi here from the azimuthal integral that would need to be done in the following lines
-    weight = lambda r, t: 2*np.pi*TwoEllipsoidCaps(r, t, s, R)
     if alpha is not None:
-        weight = lambda r, t: ConeWeightFunction(r, t, alpha)
+        weight = lambda r, t: R*R*ConeWeightFunction(r/R, t, alpha)
+    else:
+        weight = lambda r, t: 2*np.pi*TwoEllipsoidCaps(r, t, s, R)
 
     if RSD == 1:
         if is_root:
@@ -284,8 +289,10 @@ if __name__ == '__main__':
     S = [1.0]#, 0.98, 0.99, 1.01, 1.02]
     n = 3
     R = np.logspace(np.log10(2),np.log10(35),100)*10**((5-n)/3)
-    RSD = 2
+    RSD = 0
     results = []
+    #alpha = None; alphastr = ''
+    alpha = np.pi/3; alphastr = '_alpha'
 
     params = [(s, r) for s in S for r in R]
 
@@ -296,7 +303,7 @@ if __name__ == '__main__':
 
         print(f"Rank {cpu_id} is working on item {j}, which is r={r:.3f} Mpc/h for s={s:.3f}")
 
-        sto.result = XiIntegral(r, s, RSD=RSD)
+        sto.result = XiIntegral(r, s, RSD=RSD, alpha=alpha)
         sto.result_id = f"{j}"
 
         print(f"Rank {cpu_id} finished")
@@ -308,17 +315,22 @@ if __name__ == '__main__':
     if is_root:
         for s in range(len(S)):
 
-            #results = np.array([xis[f"{len(R)*s + j}"] for j in range(len(R))])
-            results = np.array([xis[len(R)*s + j] for j in range(len(R))])
+            try:
+                results = np.array([xis[f"{len(R)*s + j}"] for j in range(len(R))])
+            except:
+                # Sometimes only works with integer indices??
+                results = np.array([xis[len(R)*s + j] for j in range(len(R))])
 
             nbar = 10**n/1e9
 
-            onenn = 1 - np.exp(-nbar*4*np.pi*R**3/3 + nbar*nbar/2*results)
+            volume = 4*np.pi*R**3/3 * (1 - np.cos(alpha))
 
-            mnV = -nbar*4*np.pi*R**3/3
+            onenn = 1 - np.exp(-nbar*volume + nbar*nbar/2*results)
+
+            mnV = -nbar*volume
             nbsqxiover2 = nbar*nbar/2*results
             if s==0:
-                np.savez(f'terms_{RSD}_z={z:.2f}_n={n}', mnV=mnV, nbsqxiover2=nbsqxiover2)
+                np.savez(f'terms_{RSD}_z={z:.2f}_n={n}{alphastr}', mnV=mnV, nbsqxiover2=nbsqxiover2)
             onennpcdf = np.minimum(onenn, 1-onenn)
 
             twonn = onenn - np.exp(-nbar*4*np.pi*R**3/3 + nbar*nbar/2*results) * (nbar*4*np.pi*R**3/3 - nbar*nbar*results)
@@ -335,7 +347,7 @@ if __name__ == '__main__':
 
         for q, pcdf in enumerate(pCDFs):
             ax[0][0].loglog(R, pcdf, '.-', label=f"{S[q]:.2f}")
-            np.savez(f'pcdf_{RSD}_{q}_n={n}_z={z:.2f}',R=R,pcdf=pcdf, cdf=CDFs[q])
+            np.savez(f'pcdf_{RSD}_{q}_n={n}_z={z:.2f}{alphastr}',R=R,pcdf=pcdf, cdf=CDFs[q])
         ax[0][0].set_ylim(1e-3)
         ax[0][0].set_xlabel(r'Distance $h^{-1}$ Mpc')
         ax[0][0].set_title('Peaked 1NN-CDFs')
@@ -365,7 +377,7 @@ if __name__ == '__main__':
         ax[1][1].legend()
 
 
-        plt.savefig(f'onennpcdf_{RSD}_z={z:.2f}.png')
+        plt.savefig(f'onennpcdf_{RSD}_z={z:.2f}{alphastr}.png')
 
 
 
