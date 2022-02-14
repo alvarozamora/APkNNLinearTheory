@@ -1,4 +1,5 @@
 import numpy as np
+from time import time
 import matplotlib.pyplot as plt
 from colossus.cosmology import cosmology
 from scipy.integrate import tplquad, dblquad, quad, simps
@@ -7,7 +8,7 @@ from scipy.integrate import tplquad, dblquad, quad, simps
 import yt; yt.enable_parallelism(); print(yt.is_root()); is_root = yt.is_root(); from yt.config import ytcfg; cfg_option = "__topcomm_parallel_rank"; cpu_id = ytcfg.getint("yt", cfg_option)
 from scipy.special import spherical_jn as spjn
 import argparse
-from scipy.interpolate import interpn
+from scipy.interpolate import interpn, interp2d
 from scipy.optimize import minimize
 parser = argparse.ArgumentParser()
 parser.add_argument('--cg', type=int, default=5)
@@ -21,6 +22,11 @@ plt.rcParams['xtick.labelsize']  = 15
 plt.rcParams['ytick.labelsize']  = 15
 plt.rcParams['axes.titlesize']  = 15
 plt.rcParams['axes.labelsize']  = 15
+
+debug = False
+debug_factor = 10 if debug else 1
+
+
 
 # Define Quijote Cosmology
 Om0 = 0.3175
@@ -48,28 +54,50 @@ def DoubleSphereVolume(R,d):
         return 0
     
 
-coneweightfunction = np.load('WeightFunction.npy')
-def ConeWeightFunction(r, t, alpha=np.pi/3):
+#coneweightfunction = np.load('WeightFunction.npy')
+coneweightfunction = np.load('ConeWeightFunction.npy')
+def ConeWeightFunction(r, t, s, alpha=np.pi/3):
+
+    # Apply Coordinate Transformation due to stretch
+    r = r*np.sqrt(1 + s**3 - (-1 + s**3)*np.cos(2*t))/(np.sqrt(2)*s)
+
+    assert (t >= 0) & (t <= np.pi), "Invalid Polar Angle"
+    t = np.pi/2 - np.abs(t-np.pi/2)
+
     # These were the grids with which the array was generated
     ds = np.linspace(0,2,100)
-    ts = np.linspace(0,np.pi,100)
-    alphas = np.linspace(0, np.pi/2, 100)
-    x = (alpha, t, r)
+    ts = np.linspace(0,np.pi/2,100) # only goes to pi/2 with new interpolator, but old one goes to pi
+    #alphas = np.linspace(0, np.pi/2, 100)
+    #x = (alpha, t, r)
+    x = (r, t)
     if r < 2:
-        fraction = interpn((alphas, ts, ds), coneweightfunction, x)[0]  # fraction of points still in cone
+        #fraction = interpn((alphas, ts, ds), coneweightfunction, x)[0]  # fraction of points still in cone
+        fraction = interp2d(ds, ts, coneweightfunction)(*x)[0]
         doubleconevolume = 4 * np.pi / 3 * (1 - np.cos(alpha))          # dimensionless, i.e. R = 1
         return fraction * doubleconevolume
     else:
         return 0 
-bandweightfunction = np.load('WeightFunctionBand.npy')
-def BandWeightFunction(r, t, alpha=np.pi/3):
+
+#bandweightfunction = np.load('WeightFunctionBand.npy')
+bandweightfunction = np.load('BandWeightFunction.npy')
+def BandWeightFunction(r, t, s, alpha=np.pi/3):
+
+    # Apply Coordinate Transformation due to stretch
+    r = r*np.sqrt(1 + s**3 - (-1 + s**3)*np.cos(2*t))/(np.sqrt(2)*s)
+
+    assert (t >= 0) & (t <= np.pi), "Invalid Polar Angle"
+    t = np.pi/2 - np.abs(t-np.pi/2)
+
     # These were the grids with which the array was generated
-    ds = np.linspace(0,2,100)
-    ts = np.linspace(0,np.pi,100)
-    alphas = np.linspace(0, np.pi/2, 100)
-    x = (alpha, t, r)
+    ds = np.linspace(0, 2, 100)
+    ts = np.linspace(0, np.pi/2, 100) # only goes to pi/2 with new interpolator, but old one goes to pi
+    #alphas = np.linspace(0, np.pi/2, 100)
+    #x = (alpha, t, r)
+    x = (r, t)
     if r < 2:
-        fraction = interpn((alphas, ts, ds), bandweightfunction, x)[0]  # fraction of points still in cone
+        #fraction = interpn((alphas, ts, ds), bandweightfunction, x)[0]  # fraction of points still in band
+        #fraction = interpn((ds, ts), bandweightfunction, x)[0]  # fraction of points still in band
+        fraction = interp2d(ds, ts, bandweightfunction)(*x)[0]
         bandvolume = 4 * np.pi / 3 * np.cos(alpha)          # dimensionless, i.e. R = 1
         return fraction * bandvolume
     else:
@@ -77,12 +105,9 @@ def BandWeightFunction(r, t, alpha=np.pi/3):
 
 z = 1.0
 sv = 0
-b = 3.3  * 0.875 # This factor is used for S = 10 (TODO: VERIFY)
-#b = 3.348305028707007 * 1.01902463
-#b = 3.348305028707007 * 0.94
 f = Om0**0.6
 
-def integrand(t,r,rmu,z=z,sv=sv,b=b):
+def integrand(t, r, rmu, z=z, sv=sv, b=1):
     
     # argument of bessel
     absb = lambda k: np.abs(k*r*np.sin(t)*np.sqrt(1-rmu*rmu))
@@ -145,50 +170,8 @@ def integrand(t,r,rmu,z=z,sv=sv,b=b):
     return result
 
 
-xf = 10
-L = 40
-x = L*np.arange(xf)/xf+1/2
-y = L*np.arange(xf)/xf+1/2
-
-
-storage = {}
-def Xi(r, rmu, z=z, sv=sv, b=b):
-
-    # This part could work
-    #options={'limit':50}
-    #result = nquad(integrand, [[0, np.pi]], args=(r,rmu,z,sv,b), opts=options)
-    #assert np.abs(result[1]/result[0]) < 1e-3, "Too Much Error"
-    #return result[0]
-
-    # Newton-Cotes 4th Order
-    A = 1e-6; B = np.pi-1e-6 # Bounds
-    N = 4*50+1 # Needs to be 4k+1
-    n = N//4 # number of stencils
-    h = (B-A)/(N-1)*4 # step size
-    w = np.zeros(N) # weights 
-    x = A + np.arange(N)*h/4 #grid position
-    for i in range(n):
-        w[4*i:4*i+5] += np.array([7, 32, 12, 32, 7]) * h/90
-
-    results = {}
-    for sto, X in yt.parallel_objects(x, args.c, dynamic=True, storage=results):
-
-        j = np.where(x==X)[0][0]
-
-        sto.result = integrand(X, r=r,rmu=rmu)
-        sto.result_id = f'{j}'
-    
-    f = np.array([results[f"{i}"] for i in range(N)])
-    #f = np.array([integrand(q, r=r,rmu=rmu) for q in x])
-    #print(f)
-    #print(val)
-    if is_root:
-        print((w*f).sum())
-    return (w*f).sum()
-
-
 # Donghui Jeong Liang Dai, Marc Kamionkowski, and Alexander S. Szalay 2014 (Eq 2, 3)
-def XiRSDApprox(r, rmu, z=z, sv=sv, b=b, separateterms=False):
+def XiRSDApprox(r, rmu, z=z, sv=sv, b=1, separateterms=False):
 
     # Define Legendre Polynomials
     P0 = lambda x: 1
@@ -213,7 +196,7 @@ def XiRSDApprox(r, rmu, z=z, sv=sv, b=b, separateterms=False):
             # integrate log-grid
             # smaller r's result in larger periods for k --> need wider grid
             # r in Mpc/h
-            Npts = 10000
+            Npts = 10000//debug_factor
             kgrid = np.sort(np.concatenate([np.logspace(-6,0,Npts), np.linspace(1 + 1/Npts, np.maximum(50/r,20), Npts)]))
             integrand_grid = integrand(kgrid)
             result = simps(integrand_grid, kgrid)
@@ -254,17 +237,15 @@ def XiIntegral(R, s, R1=1e-3, RSD=2, T = [0, np.pi], alpha=None, separateterms=F
     if alpha is not None:
         if alphastr == '_alpha':
             print('Using ConeWeightFunction')
-            weight = lambda r, t: 2*np.pi*  R*R*R*ConeWeightFunction(r/R, t, alpha)
+            weight = lambda r, t: 2*np.pi*  R*R*R*ConeWeightFunction(r/R, t, s, alpha)
         if alphastr == '_band':
             print('Using BandWeightFunction')
-            weight = lambda r, t: 2*np.pi*  R*R*R*BandWeightFunction(r/R, t, alpha)
+            weight = lambda r, t: 2*np.pi*  R*R*R*BandWeightFunction(r/R, t, s, alpha)
     else:
         weight = lambda r, t: 2*np.pi*TwoEllipsoidCaps(r, t, s, R)
 
     if RSD == 1:
-        if is_root:
-            print(RSD)
-        integrand = lambda r, t: weight(r,t)*Xi(r,np.cos(t)) * r*r*np.sin(t)
+        assert False, "Invalid, no longer implemented"
     elif RSD == 2:
         if is_root:
             print("Using Dipole + Quadruple O(f^2) Approximation")
@@ -273,7 +254,7 @@ def XiIntegral(R, s, R1=1e-3, RSD=2, T = [0, np.pi], alpha=None, separateterms=F
         else:
             integrand = lambda r, t: weight(r,t)*XiRSDApprox(r,np.cos(t), separateterms=separateterms) * r*r*np.sin(t)
     elif RSD == 0:
-        integrand = lambda r, t: weight(r,t)*b*b*quijote.correlationFunction(r,z) * r*r*np.sin(t)
+        integrand = lambda r, t: weight(r,t)*quijote.correlationFunction(r,z) * r*r*np.sin(t)
     elif RSD not in [0,1,2]:
         assert False, "invalid RSD mode"
 
@@ -285,7 +266,7 @@ def XiIntegral(R, s, R1=1e-3, RSD=2, T = [0, np.pi], alpha=None, separateterms=F
     if not separateterms or RSD == 0:
         def new_integrand(t): 
             lims = dlims(t)
-            rgrid = np.linspace(lims[0], lims[1], 1000) # Linear Grid
+            rgrid = np.linspace(lims[0], lims[1], 1000//debug_factor) # Linear Grid
             #rgrid = np.logspace(np.log10(lims[0]), np.log10(lims[1]), 1000) # Logarithmic Grid
             result = simps([integrand(rg, t) for rg in rgrid], rgrid)
             assert not np.isnan(result), "new_integrand result is nan"
@@ -297,20 +278,20 @@ def XiIntegral(R, s, R1=1e-3, RSD=2, T = [0, np.pi], alpha=None, separateterms=F
         #return result[0]
 
         # Simpsons Rule
-        thgrid = np.linspace(0, np.pi, 200)
+        thgrid = np.linspace(0, np.pi, 200//debug_factor)
         result = simps([new_integrand(th) for th in thgrid], thgrid)
         return result
     else:
         def new_integrand(t):
             lims = dlims(t)
-            rgrid = np.linspace(lims[0], lims[1], 1000) # Linear Grid
+            rgrid = np.linspace(lims[0], lims[1], 1000//debug_factor) # Linear Grid
             #rgrid = np.logspace(np.log10(lims[0]), np.log10(lims[1]), 1000) # Logarithmic Grid
             result = simps([integrand(rg, t) for rg in rgrid], rgrid, axis=0)
             assert not np.isnan(result).all(), "new_integrand result is nan"; assert result.size == 3, "wrong size"
             return result
 
         # Simpsons Rule
-        thgrid = np.linspace(0, np.pi, 100)
+        thgrid = np.linspace(0, np.pi, 100//debug_factor)
         result = simps([new_integrand(th) for th in thgrid], thgrid, axis=0)
         return result
 
@@ -330,7 +311,7 @@ To run band vs cone (vs sphere), need to
 if __name__ == '__main__':
 
 
-    S = [1.0]#, 0.98, 0.99, 1.01, 1.02]
+    S = [1.0, 0.98, 0.99, 1.01, 1.02]
     n = 4
     R = np.logspace(np.log10(2),np.log10(35),100)*10**((5-n)/3) * 2**(1/3)
     RSD = 2
@@ -347,11 +328,12 @@ if __name__ == '__main__':
         j = params.index((s,r))
 
         print(f"Rank {cpu_id} is working on item {j}, which is r={r:.3f} Mpc/h for s={s:.3f}")
+        start = time()
 
         sto.result = XiIntegral(r, s, RSD=RSD, alpha=alpha, separateterms=True)
         sto.result_id = f"{j}"
 
-        print(f"Rank {cpu_id} finished")
+        print(f"Rank {cpu_id} finished in {time()-start:.2f} seconds.")
 
 
     CDFs = np.empty((len(R),len(S))); pCDFs = np.empty((len(R),len(S)))
@@ -369,6 +351,8 @@ if __name__ == '__main__':
         plt.savefig(f"b_loss_landscape_{RSD}_{n}{alphastr}.png")
 
     if is_root:
+
+        opt_b = 0
         for s in range(len(S)):
 
             try:
@@ -387,51 +371,62 @@ if __name__ == '__main__':
             elif alphastr == '_band':
                 volume = 4*np.pi*R**3/3 * np.cos(alpha) #band
 
-            def OneNN(b, originalb=3.3*0.875):
+            def OneNN(b, originalb=1.0):
                 if RSD == 2:
                     return 1 - np.exp(-nbar*volume + nbar*nbar/2*(results * np.array([b*b, b,1])[None,:]).sum(-1))
                 elif RSD == 0:
                     return 1 - np.exp(-nbar*volume + nbar*nbar/2*results * b**2 /originalb**2)
 
+            # Only fit bias for s = 1; meaningless otherwise
+            if s == 0:
+                if alphastr == '_alpha':
+                    measurements = np.load("/oak/stanford/orgs/kipac/users/pizza/Quijote/final_cone_cdf.npz")
+                    rcb, avg = np.logspace(np.log10(2),np.log10(35), 100)*10**((5-n)/3) * 2**(1/3), measurements['cavg'][5-n, int(RSD==2)] 
+                elif alphastr == '_band':
+                    measurements = np.load("/oak/stanford/orgs/kipac/users/pizza/Quijote/final_cone_cdf.npz")
+                    rcb, avg = np.logspace(np.log10(2),np.log10(35), 100)*10**((5-n)/3) * 2**(1/3), measurements['bavg'][5-n, int(RSD==2)]
+                elif alphastr == '':
+                    measurements = np.load("final_cdf.npz")
+                    rcb, avg = np.logspace(np.log10(2),np.log10(35), 100)*10**((5-n)/3)           , measurements[ 'avg'][5-n, int(RSD==2)]
 
-            if alphastr == '_alpha':
-                measurements = np.load("/oak/stanford/orgs/kipac/users/pizza/Quijote/final_cone_cdf.npz")
-                rcb, avg = np.logspace(np.log10(2),np.log10(35), 100)*10**((5-n)/3) * 2**(1/3), measurements['cavg'][5-n, int(RSD==2)] 
-            elif alphastr == '_band':
-                measurements = np.load("/oak/stanford/orgs/kipac/users/pizza/Quijote/final_cone_cdf.npz")
-                rcb, avg = np.logspace(np.log10(2),np.log10(35), 100)*10**((5-n)/3) * 2**(1/3), measurements['bavg'][5-n, int(RSD==2)]
-            elif alphastr == '':
-                measurements = np.load("final_cdf.npz")
-                rcb, avg = np.logspace(np.log10(2),np.log10(35), 100)*10**((5-n)/3)           , measurements['avg'][5-n, int(RSD==2)]
+                def l2(b):
+                    if type(b) in [float, np.float32, np.float64]:
+                        pass
+                    else:
+                        b = b[0]
+                    onenn = OneNN(b); ponenn = np.minimum(onenn, 1-onenn)
+                    m_onenn = np.interp(R, rcb, avg); m_ponenn = np.minimum(m_onenn, 1-m_onenn)
+                    loss = ((np.log10(ponenn) - np.log10(m_ponenn))**2)[np.logical_and(m_onenn>0.5,m_onenn<0.9)].mean(0)
+                    print(b, loss)
+                    return loss
 
-            def l2(b):
-                if type(b) in [float, np.float32, np.float64]:
-                    pass
-                else:
-                    b = b[0]
-                onenn = OneNN(b); ponenn = np.minimum(onenn, 1-onenn)
-                m_onenn = np.interp(R, rcb, avg); m_ponenn = np.minimum(m_onenn, 1-m_onenn)
-                loss = ((np.log10(ponenn) - np.log10(m_ponenn))**2)[np.logical_and(m_onenn>0.5,m_onenn<0.99)].mean(0)
-                print(b, loss)
-                return loss
+                opt = False
+                if opt:
+                    opt_b = minimize(l2, np.array([3.0]), method="Nelder-Mead", bounds=(1.0,5.0))
+                    assert opt_b.success == True, "Didn't converge (or some other error)"
+                    opt_b = opt_b.x[0]
 
-            opt_b = minimize(l2, np.array([3.0]), method="Nelder-Mead", bounds=(1.0,5.0))
-            assert opt_b.success == True, "Didn't converge (or some other error)"
-            opt_b = opt_b.x[0]
-            loss_landscape(opt_b)
-            print(f"Optimal bias for n={n}, RSD={RSD} is {opt_b:.3f}")
+                    print(f"Optimal bias for n={n}, RSD={RSD} is {opt_b:.3f}, done at s={s:.2f}")
+                else: 
+                    if n == 4:
+                        opt_b = 2.5
+                    elif n == 3:
+                        opt_b = 2.19
+                print(f"Using bias {opt_b:.3f} for n={n}, RSD={RSD}")
+                loss_landscape(opt_b)
                 
     
             def TwoNN(b=opt_b):
                 if RSD == 2: 
                     return OneNN(b) - np.exp(-nbar*volume + nbar*nbar/2*(results * np.array([b*b, b,1])[None,:]).sum(-1)) * (nbar*volume - nbar*nbar*(results * np.array([b*b, b,1])[None,:]).sum(-1))
                 elif RSD == 0:
-                    return OneNN(b) - np.exp(-nbar*volume + nbar*nbar/2*results) * (nbar*volume - nbar*nbar*results)
+                    return OneNN(b) - np.exp(-nbar*volume + nbar*nbar/2*results*b*b) * (nbar*volume - nbar*nbar*results*b*b)
             
             #mnV = -nbar*volume
             #nbsqxiover2 = nbar*nbar/2*results
             #if s==0:
             #    np.savez(f'terms_{RSD}_z={z:.2f}_n={n}{alphastr}', mnV=mnV, nbsqxiover2=nbsqxiover2)
+
             onenn = OneNN(opt_b)
             onennpcdf = np.minimum(onenn, 1-onenn)
 
@@ -451,11 +446,11 @@ if __name__ == '__main__':
             ax[0][0].loglog(R, pcdf, '.-', label=f"{S[q]:.2f}")
             np.savez(f'pcdf_{RSD}_{q}_n={n}_z={z:.2f}{alphastr}',R=R,pcdf=pcdf, cdf=CDFs[q])
         if alphastr == '_alpha':
-            ax[0][0].loglog(rcb, measurements['cpavg'][5-n, int(RSD==2)], '--', label=f"M{S[q]:.2f}")
+            ax[0][0].loglog(rcb, measurements['cpavg'][5-n, int(RSD==2)], '--', label=f"M1")
         elif alphastr == '_band':
-            ax[0][0].loglog(rcb, measurements['bpavg'][5-n, int(RSD==2)], '--', label=f"M{S[q]:.2f}")
+            ax[0][0].loglog(rcb, measurements['bpavg'][5-n, int(RSD==2)], '--', label=f"M1")
         elif alphastr == '':
-            ax[0][0].log(rcb, measurements['avg'][5-n, int(RSD==2)], '--', label=f"M{S[q]:.2f}")
+            ax[0][0].log(rcb, measurements['avg'][5-n, int(RSD==2)], '--', label=f"M1")
         ax[0][0].set_ylim(1e-3)
         ax[0][0].set_xlabel(r'Distance $h^{-1}$ Mpc')
         ax[0][0].set_title('Peaked 1NN-CDFs')
