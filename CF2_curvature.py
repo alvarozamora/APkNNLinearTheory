@@ -445,11 +445,13 @@ if __name__ == '__main__':
         cones = np.load(f'cdfs_for_curvature_0_n={n}_z={z:.2f}_alpha.npz')
         bands = np.load(f'cdfs_for_curvature_0_n={n}_z={z:.2f}_band.npz')
 
-        cones = np.load(f'cdfs_for_curvature_2_n={n}_z={z:.2f}_alpha.npz')
-        bands = np.load(f'cdfs_for_curvature_2_n={n}_z={z:.2f}_band.npz')
+        cones2 = np.load(f'cdfs_for_curvature_2_n={n}_z={z:.2f}_alpha.npz')
+        bands2 = np.load(f'cdfs_for_curvature_2_n={n}_z={z:.2f}_band.npz')
 
         coneCDFs, conepCDFs, conetwoCDFs, conetwopCDFs, coneR, coneS, coneopt_b = cones["CDFs"], cones["pCDFs"], cones["twoCDFs"], cones["twopCDFs"], cones["R"], cones["S"], cones["opt_b"][0]
         bandCDFs, bandpCDFs, bandtwoCDFs, bandtwopCDFs, bandR, bandS, bandopt_b = bands["CDFs"], bands["pCDFs"], bands["twoCDFs"], bands["twopCDFs"], bands["R"], bands["S"], bands["opt_b"][0]
+        coneCDFs2, conepCDFs2, conetwoCDFs2, conetwopCDFs2, coneR2, coneS2, coneopt_b2 = cones2["CDFs"], cones2["pCDFs"], cones2["twoCDFs"], cones2["twopCDFs"], cones2["R"], cones2["S"], cones2["opt_b"][0]
+        bandCDFs2, bandpCDFs2, bandtwoCDFs2, bandtwopCDFs2, bandR2, bandS2, bandopt_b2 = bands2["CDFs"], bands2["pCDFs"], bands2["twoCDFs"], bands2["twopCDFs"], bands2["R"], bands2["S"], bands2["opt_b"][0]
 
         ks = np.abs(coneCDFs-bandCDFs).max(-1)
 
