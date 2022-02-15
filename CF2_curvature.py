@@ -454,9 +454,11 @@ if __name__ == '__main__':
         bandCDFs2, bandpCDFs2, bandtwoCDFs2, bandtwopCDFs2, bandR2, bandS2, bandopt_b2 = bands2["CDFs"], bands2["pCDFs"], bands2["twoCDFs"], bands2["twopCDFs"], bands2["R"], bands2["S"], bands2["opt_b"][0]
 
         ks = np.abs(coneCDFs-bandCDFs).max(-1)
+        ks2 = np.abs(coneCDFs2-bandCDFs2).max(-1)
 
         plt.figure()
-        plt.plot(np.array(S)[np.argsort(S)], ks[np.argsort(S)],'.--')
+        plt.plot(np.array(S)[np.argsort(S)],  ks[np.argsort(S)],'.--')
+        plt.plot(np.array(S)[np.argsort(S)], ks2[np.argsort(S)],'.--')
         plt.xlabel('Stretch Factor')
         plt.ylabel('KS Metric')
         plt.savefig(f'curvature_n={n}_z={z:.2f}.png', dpi=230)
